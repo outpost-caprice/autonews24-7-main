@@ -1,14 +1,14 @@
 import openai
-from openai import OpenAI
+from openai import AsyncOpenAI
 import logging
 import random
 import os
 import asyncio
 
 OPENAI_api_key = os.getenv("OPENAI_API_KEY")
+client = AsyncOpenAI(OPENAI_api_key)
 
 async def openai_api_call_async(model, temperature, messages, max_tokens, response_format):
-    client = OpenAI(api_key=OPENAI_api_key)
     try:
         response = await client.chat.completions.create(model=model, temperature=temperature, messages=messages, max_tokens=max_tokens, response_format=response_format)
         return response.choices[0].message.content
@@ -47,7 +47,7 @@ async def generate_opinion_async(content):
         logging.error(f"意見生成中にエラーが発生: {e}")
         return [f"エラーが発生しました: {e}"]
 
-# 非同期メイン関数
+# 非同期メイン関数を呼び出す。Function設定
 async def main():
     content = "ここに意見を求める内容を入れます"
     opinions = await generate_opinion_async(content)
