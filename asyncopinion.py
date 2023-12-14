@@ -4,14 +4,34 @@ from openai import AsyncOpenAI
 import logging
 import random
 import os
-import re  # 正規表現を使用するために追加
+import re
+import aiohttp #aiohttpを使用することを忘れない！
 from markupsafe import escape
-import flask
 import base64
 import json
 
 OPENAI_api_key = os.getenv("OPENAI_API_KEY")
 client = AsyncOpenAI(api_key=OPENAI_api_key)
+
+async def post_comment_async(wp_url, article_id, username, comment):
+    """
+    WordPress REST APIを使用してコメントを投稿する非同期関数。basic認証を使用すること
+    """
+    url = f"{wp_url}/wp-json/wp/v2/comments"
+    data = {
+        'post': article_id,
+        'author_name': username,
+        'content': comment
+    }
+    headers = {
+        'Authorization': 'Bearer YOUR_ACCESS_TOKEN'  # 適切な認証トークンに置き換えてください
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=data, headers=headers) as response:
+            if response.status == 201:
+                return await response.json()
+            else:
+                raise Exception(f"コメント投稿エラー: 状態コード {response.status}")
 
 def extract_article_id(url):
     """
@@ -27,23 +47,6 @@ def extract_article_id(url):
     except Exception as e:
         logging.error(f"記事IDの抽出中にエラー: {e}")
         return None
-
-def process_pubsub_message(event, context):
-    # Pub/Subメッセージを取得
-    if 'data' in event:
-        message_data = base64.b64decode(event['data']).decode('utf-8')
-        message_json = json.loads(message_data)
-
-        # JSONからコンテンツ、URL、タグを取得
-        article_content = message_json.get('content', '')
-        article_url = message_json.get('url', '')
-        article_tags = message_json.get('tags', [])
-
-        # URLから記事IDを抽出
-        article_id = extract_article_id(article_url)
-
-        # 意見生成と記事IDの返却
-        return asyncio.run(generate_opinion_async(article_content)), article_id
 
 async def openai_api_call_async(model, temperature, messages, max_tokens, response_format):
     try:
@@ -92,3 +95,29 @@ async def generate_opinion_async(content):
         logging.error(f"意見生成中にエラーが発生: {e}")
         return [f"エラーが発生しました: {e}"]
 
+def process_pubsub_message(event, context):
+    # Pub/Subメッセージを取得
+    if 'data' in event:
+        message_data = base64.b64decode(event['data']).decode('utf-8')
+        message_json = json.loads(message_data)
+
+        # JSONからコンテンツ、URL、タグを取得
+        article_content = message_json.get('content', '')
+        article_url = message_json.get('url', '')
+        #タグでペルソナを切り替える処理を後から追加しておくこと
+        #マジでここ忘れんな
+        article_tags = message_json.get('tags', [])
+
+        # URLから記事IDを抽出
+        article_id = extract_article_id(article_url)
+
+        # 意見生成
+        opinions = asyncio.run(generate_opinion_async(article_content))
+
+        # WordPressへのコメント投稿
+        wp_url = "YOUR_WORDPRESS_SITE_URL"  # WordPressサイトのURLに置き換えてください
+        for opinion in opinions:
+            username, comment = opinion.split(": ", 1)
+            asyncio.run(post_comment_async(wp_url, article_id, username, comment))
+
+        return opinions, article_id
